@@ -2,7 +2,15 @@ import sys, pyautogui
 from PyQt5 import QtWidgets, QtCore, QtGui
 from functools import partial
 
-class mainWindow(QtWidgets.QWidget):
+class parent(QtWidgets.QWidget):
+    
+    def __init__(self):
+        super().__init__()
+
+        self.x, self.y = 0, 0
+
+
+class mainWindow(parent):
 
     def __init__(self):
         super().__init__()
@@ -12,8 +20,8 @@ class mainWindow(QtWidgets.QWidget):
     def initUI(self):
         
         # ------------ spinboxes ------------ #
-        self.x = spinBox()
-        self.y = spinBox()
+        self.xcoord = spinBox()
+        self.ycoord = spinBox()
         self.duration = spinBox()
         self.frequency = spinBox()
 
@@ -40,10 +48,10 @@ class mainWindow(QtWidgets.QWidget):
         grid.setSpacing(10)
 
         grid.addWidget(self.xLabel, 1, 0)
-        grid.addWidget(self.x, 1, 1)
+        grid.addWidget(self.xcoord, 1, 1)
 
         grid.addWidget(self.yLabel, 2, 0)
-        grid.addWidget(self.y, 2, 1)
+        grid.addWidget(self.ycoord, 2, 1)
 
         grid.addWidget(self.coordBtn, 1, 2, 2, 1)
 
@@ -62,28 +70,67 @@ class mainWindow(QtWidgets.QWidget):
         self.setGeometry(300, 300, 300, 220)
         self.setWindowTitle('Auto Clicker')
 
+        self.thread = QtCore.QThread(self)
+        self.thread.setTerminationEnabled(True)
+
         # ------------ button connection ------------ #
         self.coordBtn.clicked.connect(self.coordScreen)
-        self.okBtn.clicked.connect(partial(self.autoclick, self.duration.value(), self.frequency.value(), self.x.value(), self.y.value()))
+        self.okBtn.clicked.connect(self.threadConnect)
+        self.cancelBtn.clicked.connect(self.abortThread)
 
 
     # ------------ button functions ------------ #
+    
+    # ------------ show overlay ------------ #
     @QtCore.pyqtSlot()
     def coordScreen(self):
-        self.coord = coordWindow()
-        self.coord.show()
-        self.x.setValue(self.coord.x)
+        self.overlay = Overlay()
+        self.overlay.show()
+        self.overlay.xc.connect(self.updateX)
+        self.overlay.yc.connect(self.updateY)
+
+    # ------------ threading autoclick function ------------ #
+    def threadConnect(self):
+        self.worker = Worker()
+        self.worker.moveToThread(self.thread)
         
+        self.thread.started.connect(partial(self.worker.autoClick, self.duration.value(), self.frequency.value(), self.xcoord.value(), self.ycoord.value()))
+        self.worker.finished.connect(self.thread.quit)
 
+        self.thread.start()
+
+    # ------------ threading abort function ------------ #
+    def abortThread(self):
+        self.worker.abort = True
+
+    # ------------ update coordinates ------------ #
+    
+    def updateX(self, xc):
+        self.xcoord.setValue(xc)
+    
+    def updateY(self, yc):
+        self.ycoord.setValue(yc)
+
+
+# ------------ worker class / autoclick function ------------ #
+class Worker(QtCore.QObject):
+    finished = QtCore.pyqtSignal()
+    def __init__(self):
+        super().__init__()
+        self.abort = False
     @QtCore.pyqtSlot()
-    def autoclick(self, dur, freq, x, y):
-        print(f'{dur}, {freq}, {x}, {y}')
-        for minutes in range(dur):
-            for period in range(freq):
+    def autoClick(self, dur, freq, x, y):
+        for _ in range(dur):
+            for __ in range(freq):
                 pyautogui.click(x, y, 1, 60/freq)
+                if self.abort == True:
+                    break
+            if self.abort == True:
+                break
+        self.finished.emit()
 
-# ------------ Second Window Label ------------ #
-class coordLabel(QtWidgets.QLabel):
+# ------------ Overlay Label ------------ #
+class OverlayLabel(QtWidgets.QLabel):
      
     def __init__(self):
         super().__init__()  
@@ -100,32 +147,33 @@ class coordLabel(QtWidgets.QLabel):
         self.x, self.y = x, y
         self.setText(f'Please click on the screen *avoid the corners* ({self.x}, {self.y})')
 
-# ------------ Second Window Overlay ------------ #
-class coordWindow(QtWidgets.QWidget):
-    def __init__(self, parent=mainWindow):
+
+
+# ------------ Overlay ------------ #
+class Overlay(parent):
+    xc = QtCore.pyqtSignal(int)
+    yc = QtCore.pyqtSignal(int)
+
+    def __init__(self):
         super().__init__()
         self.setWindowOpacity(0.4)
-        self.label = coordLabel()
+        self.label = OverlayLabel()
         layoutQHBoxLayout = QtWidgets.QHBoxLayout()
         layoutQHBoxLayout.addWidget(self.label)    
         self.setLayout(layoutQHBoxLayout)
         self.showFullScreen()
-        self.x, self.y = 0, 0
-
-        self.w = parent
+        
 
     def mousePressEvent(self, eventQMouseEvent):
         if eventQMouseEvent.button() == QtCore.Qt.LeftButton:
-            print(f'{self.label.x}, {self.label.y}')
             self.x = self.label.x
             self.y = self.label.y
-            print(f'{self.x}, {self.y}')
-
+            self.xc.emit(self.x)
+            self.yc.emit(self.y)
             
             self.close()
 
-
-    
+# ------------ spinbox class ------------ #
 class spinBox(QtWidgets.QSpinBox):
 
     def __init__(self):
@@ -135,6 +183,7 @@ class spinBox(QtWidgets.QSpinBox):
         self.resize(self.sizeHint())
 
 
+# ------------ main ------------ #
 def main():
     app = QtWidgets.QApplication(sys.argv)
     window = mainWindow()
